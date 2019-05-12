@@ -32,6 +32,7 @@ var displayFiltersToWhere = require('./displayFiltersToWhere');
 var filtersToTables = require('./filtersToTables');
 var addDefaultsToFilter = require('./addDefaultsToFilter');
 var config = require('./config');
+var units = require('./units');
 var utils = require('./filterObjectUtils');
 
 
@@ -39,17 +40,16 @@ var utils = require('./filterObjectUtils');
 // Assumes that instanceid is an integer, ready to be plugged
 // directly into SQL
 function makeSqlForMapFeatures(filterString, displayString, restrictFeatureString, instanceid,
-                               zoom, isUtfGridRequest, isPolygonRequest) {
+                               zoom, isUtfGridRequest, isPolygonRequest, instanceConfig) {
     var geom_spec = config.sqlForMapFeatures.fields.geom,
         geom_field = isPolygonRequest ? geom_spec.polygon : geom_spec.point,
-        otherFields = (isUtfGridRequest ? config.sqlForMapFeatures.fields.utfGrid : config.sqlForMapFeatures.fields.base),
         parsedFilterObject = filterString ? JSON.parse(filterString) : {},
         displayFilters = displayString ? JSON.parse(displayString) : undefined,
         restrictFeatureFilters = restrictFeatureString ? JSON.parse(restrictFeatureString) : undefined,
 
-        filterObject = addDefaultsToFilter(parsedFilterObject, zoom, isPolygonRequest),
-
-        tables = filtersToTables(filterObject, displayFilters, isPolygonRequest),
+        filterObjectWithDefaults = addDefaultsToFilter(parsedFilterObject, zoom, isPolygonRequest),
+        filterObject = units.convertFilterUnits(filterObjectWithDefaults, instanceConfig),
+        tables = filtersToTables(filterObject, displayFilters, isPolygonRequest, isUtfGridRequest),
 
         where = '',
         displayClause = displayFiltersToWhere(displayFilters, restrictFeatureFilters, displayPlotsOnly(filterObject)),
@@ -79,10 +79,19 @@ function makeSqlForMapFeatures(filterString, displayString, restrictFeatureStrin
         where = 'WHERE ' + where;
     }
 
+    var otherFields;
+    if (isUtfGridRequest) {
+        otherFields = config.sqlForMapFeatures.fields.utfGrid;
+    } else if (isPolygonRequest) {
+        otherFields = config.sqlForMapFeatures.fields.polygon;
+    } else {
+        otherFields = config.sqlForMapFeatures.fields.base;
+    }
+
     geom_field = util.format("%s AS %s",
                              geom_field, config.customDbFieldNames.geom);
     return _.template(
-        '( SELECT <%= fields %> FROM <%= tables %> <%= where %> ) otmfiltersql '
+        'SELECT <%= fields %> FROM <%= tables %> <%= where %>'
     )({
         fields: geom_field + ', ' + otherFields,
         tables: tables.sql,
